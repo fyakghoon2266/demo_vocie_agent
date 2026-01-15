@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>理專語音助手 (WMS 模擬)</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { padding: 10px; border-radius: 5px; margin-bottom: 20px; font-weight: bold; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .btn { padding: 10px 20px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; }
+        .btn-start { background-color: #007bff; color: white; }
+        .btn-stop { background-color: #dc3545; color: white; display: none; }
+        
+        #response-area { margin-top: 20px; border: 1px solid #ddd; padding: 15px; height: 300px; overflow-y: auto; background-color: #fafafa; }
+        .ai-msg { color: #0056b3; margin-bottom: 10px; display: block; }
+        .typing { color: #888; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>理專語音助手 - WMS 前台模擬</h2>
+    <div id="status" class="status disconnected">系統狀態：未連線</div>
+    
+    <button id="btn-start" class="btn btn-start" onclick="startSession()">開啟通話 (連線 AP)</button>
+    <button id="btn-stop" class="btn btn-stop" onclick="stopSession()">結束通話</button>
+
+    <h3>AI 建議話術 (來自 AP 數據中台)：</h3>
+    <div id="response-area"></div>
+</div>
+
+<script>
+    let ws;
+    let audioContext;
+    let audioWorkletNode;
+    let source;
+    let currentResponseDiv = null;
+
+    const statusDiv = document.getElementById('status');
+    const responseArea = document.getElementById('response-area');
+    const btnStart = document.getElementById('btn-start');
+    const btnStop = document.getElementById('btn-stop');
+
+    async function startSession() {
+        // 1. 建立 WebSocket 連線到本地 AP
+        ws = new WebSocket("ws://" + window.location.host + "/ws");
+
+        ws.onopen = async () => {
+            statusDiv.innerText = "系統狀態：已連線 (AP <-> Azure Ready)";
+            statusDiv.className = "status connected";
+            btnStart.style.display = "none";
+            btnStop.style.display = "inline-block";
+            
+            // 2. 開始錄音
+            await startAudioRecording();
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'text_delta') {
+                // 即時顯示文字
+                if (!currentResponseDiv) {
+                    currentResponseDiv = document.createElement('div');
+                    currentResponseDiv.className = 'ai-msg';
+                    currentResponseDiv.innerHTML = "<strong>助手建議：</strong>";
+                    responseArea.appendChild(currentResponseDiv);
+                    responseArea.scrollTop = responseArea.scrollHeight;
+                }
+                currentResponseDiv.innerHTML += data.content;
+            } else if (data.type === 'done') {
+                currentResponseDiv = null; // 結束這一段話，準備下一段
+            }
+        };
+
+        ws.onclose = () => {
+            stopSession();
+        };
+    }
+
+    function stopSession() {
+        if (ws) ws.close();
+        if (audioContext) audioContext.close();
+        
+        statusDiv.innerText = "系統狀態：已斷線";
+        statusDiv.className = "status disconnected";
+        btnStart.style.display = "inline-block";
+        btnStop.style.display = "none";
+    }
+
+    // --- 音訊處理核心 (Web Audio API) ---
+    // 將麥克風聲音轉為 PCM 16bit 24kHz 並傳送
+    async function startAudioRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new AudioContext({ sampleRate: 24000 }); // 強制 Azure 要求的 24kHz
+            source = audioContext.createMediaStreamSource(stream);
+
+            // 這裡用一個簡單的 ScriptProcessor (雖然舊但對 Demo 來說相容性最好)
+            // 實際生產環境建議改用 AudioWorklet
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            processor.onaudioprocess = (e) => {
+                if (ws.readyState !== WebSocket.OPEN) return;
+
+                const inputData = e.inputBuffer.getChannelData(0);
+                
+                // Float32 -> Int16 (PCM)
+                const pcmData = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    // 簡單的音量放大 (Optional) 與轉換
+                    let s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                // 轉 Base64
+                const base64Audio = arrayBufferToBase64(pcmData.buffer);
+                
+                // 傳送給 AP
+                ws.send(JSON.stringify({ audio: base64Audio }));
+            };
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+        } catch (err) {
+            console.error("錄音失敗:", err);
+            alert("無法存取麥克風");
+        }
+    }
+
+    function arrayBufferToBase64(buffer) {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    }
+</script>
+
+</body>
+</html>
