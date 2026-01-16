@@ -26,8 +26,8 @@ LITELLM_API_KEY = os.getenv("LITELLM_API_KEY")
 # --- 模擬護欄邏輯 (Guardrail) ---
 async def check_content_safety(text: str) -> bool:
     """
-    這裡是你未來的護欄邏輯。
-    目前先設定為總是通過，但你可以加上關鍵字過濾或呼叫另一個 API。
+    這裡是未來的護欄邏輯。
+    目前先設定為總是通過，但可以加上關鍵字過濾或呼叫另一個 API。
     """
     # 範例：如果出現 "比特幣"，視為違規
     if "比特幣" in text:
@@ -71,7 +71,6 @@ async def websocket_endpoint(client_ws: WebSocket):
                     "instructions": """
                     你是一位專業的銀行理專助手。
                     請根據客戶的語音內容，即時提供簡短、專業的建議話術。
-                    只回傳建議的文字，不要回傳語音。
                     """,
                     "input_audio_format": "pcm16",
                     "turn_detection": {
